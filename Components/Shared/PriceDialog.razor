@@ -1,0 +1,41 @@
+@inject DialogService Dialogs
+
+<form @onsubmit="Apply">
+    <RadzenStack Gap="1rem">
+        <div class="pay-total">
+            <span>Regular price</span>
+            <strong>@CatalogPrice.ToString("C")</strong>
+        </div>
+
+        <RadzenFormField Text="New price" Style="width: 100%">
+            <RadzenNumeric TValue="decimal" @bind-Value="price" Immediate="true" Min="0" Format="0.00" ShowUpDown="false"
+                           TextAlign="TextAlign.Right" Style="font-size: 1.5rem" class="price-input" />
+        </RadzenFormField>
+
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+            @if (CurrentOverride is not null)
+            {
+                <RadzenButton Text="Use regular price" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close(new Result(null)))" />
+            }
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close(null))" />
+            <RadzenButton ButtonType="ButtonType.Submit" Text="Change price" Icon="sell" Disabled="@(price < 0)" />
+        </RadzenStack>
+    </RadzenStack>
+</form>
+
+@code {
+    /// <summary>The new per-unit price, or null to go back to the catalog price.</summary>
+    public record Result(decimal? Price);
+
+    [Parameter] public decimal CatalogPrice { get; set; }
+    [Parameter] public decimal? CurrentOverride { get; set; }
+
+    private decimal price;
+
+    protected override void OnInitialized() => price = CurrentOverride ?? CatalogPrice;
+
+    private void Apply()
+    {
+        if (price >= 0) Dialogs.Close(new Result(price));
+    }
+}

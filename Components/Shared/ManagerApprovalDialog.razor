@@ -1,0 +1,92 @@
+@inject StaffService Staff
+@inject DialogService Dialogs
+
+<RadzenStack Gap="1rem">
+    <RadzenAlert AlertStyle="AlertStyle.Info" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" class="rz-m-0">
+        @Action
+    </RadzenAlert>
+
+    @if (error is not null)
+    {
+        <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" class="rz-m-0 approval-error">
+            @error
+        </RadzenAlert>
+    }
+
+    <form class="approval-card-form" @onsubmit="ApproveWithCardAsync">
+        <label class="account-field">
+            <span>Manager: scan your ID card</span>
+            <input @ref="cardInput" type="password" class="rz-textbox approval-card" autocomplete="off" @bind="cardCode" />
+        </label>
+    </form>
+
+    <div class="account-divider"><span>or</span></div>
+
+    <form class="approval-password-form" @onsubmit="ApproveWithPasswordAsync">
+        <RadzenStack Gap="0.75rem">
+            <label class="account-field">
+                <span>User name</span>
+                <input class="rz-textbox approval-username" autocomplete="off" @bind="userName" />
+            </label>
+            <label class="account-field">
+                <span>Password</span>
+                <input type="password" class="rz-textbox approval-password" autocomplete="off" @bind="password" />
+            </label>
+            <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem">
+                <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close(null))" />
+                <RadzenButton ButtonType="ButtonType.Submit" Text="Approve" Icon="verified_user" Disabled="@busy" />
+            </RadzenStack>
+        </RadzenStack>
+    </form>
+</RadzenStack>
+
+@code {
+    /// <summary>What is being approved, e.g. "Remove 1 x Cola from the sale".</summary>
+    [Parameter] public string Action { get; set; } = "";
+
+    private ElementReference cardInput;
+    private string cardCode = "";
+    private string userName = "";
+    private string password = "";
+    private string? error;
+    private bool busy;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await cardInput.FocusAsync();
+    }
+
+    // The inputs stay enabled while a check runs (a disabled field loses the focus, and the next card swipe would go
+    // nowhere); submits during a check are ignored instead.
+
+    private Task ApproveWithCardAsync()
+    {
+        if (busy) return Task.CompletedTask;
+        var code = cardCode;
+        cardCode = "";
+        return code.Trim().Length == 0 ? Task.CompletedTask : VerifyAsync(() => Staff.VerifyManagerCardAsync(code));
+    }
+
+    private Task ApproveWithPasswordAsync()
+    {
+        if (busy) return Task.CompletedTask;
+        var (name, pass) = (userName, password);
+        password = "";
+        return VerifyAsync(() => Staff.VerifyManagerPasswordAsync(name, pass));
+    }
+
+    private async Task VerifyAsync(Func<Task<(Approver? Approver, string? Error)>> verify)
+    {
+        busy = true;
+        try
+        {
+            var (approver, problem) = await verify();
+            if (approver is not null) Dialogs.Close(approver);
+            else error = problem;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

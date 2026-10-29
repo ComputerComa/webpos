@@ -1,0 +1,6 @@
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using WebPos.Components.Account
+@layout AccountLayout
+@* Sign-in has to set a cookie, which only works in a regular HTTP request, not over the interactive circuit. *@
+@attribute [ExcludeFromInteractiveRouting]

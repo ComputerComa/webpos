@@ -1,0 +1,11 @@
+@using WebPos.Reports
+
+@* A receipt drawn as a strip of till paper, ending in the receipt number as a barcode (scan it on the Transactions page). *@
+<div class="receipt-paper">
+    <pre class="receipt-text">@Receipt.Text</pre>
+    <div class="receipt-barcode"><Barcode Value="@Receipt.Number" BarHeight="40" /></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Receipt Receipt { get; set; } = default!;
+}

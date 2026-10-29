@@ -1,0 +1,118 @@
+@inject StaffService Staff
+@inject DialogService Dialogs
+@inject AuthenticationStateProvider Auth
+
+<form @onsubmit="SaveAsync" class="user-form">
+    <RadzenStack Gap="1rem">
+        @if (errors.Count > 0)
+        {
+            <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" class="rz-m-0 user-errors">
+                @foreach (var error in errors)
+                {
+                    <div>@error</div>
+                }
+            </RadzenAlert>
+        }
+
+        <RadzenRow Gap="1rem">
+            <RadzenColumn Size="12" SizeSM="6">
+                <RadzenFormField Text="User name (for logging in)" Style="width: 100%">
+                    <RadzenTextBox @bind-Value="form.UserName" Name="UserName" MaxLength="256" autocomplete="off" />
+                </RadzenFormField>
+            </RadzenColumn>
+            <RadzenColumn Size="12" SizeSM="6">
+                <RadzenFormField Text="Display name" Style="width: 100%">
+                    <RadzenTextBox @bind-Value="form.DisplayName" Name="DisplayName" MaxLength="100" autocomplete="off" />
+                </RadzenFormField>
+            </RadzenColumn>
+        </RadzenRow>
+
+        <RadzenFormField Text="Role" Style="width: 100%">
+            <RadzenDropDown TValue="string" @bind-Value="form.Role" Data="@roleOptions" TextProperty="Text" ValueProperty="Value" Name="Role" />
+        </RadzenFormField>
+
+        @if (!form.IsNew)
+        {
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenCheckBox @bind-Value="form.IsActive" Name="IsActive" />
+                <RadzenLabel Text="Active (can log in and make sales)" Component="IsActive" />
+            </RadzenStack>
+        }
+
+        <RadzenStack Gap="0.5rem">
+            <RadzenFormField Text="@(form.IsNew ? "Password" : "New password (leave blank to keep the current one)")" Style="width: 100%">
+                <RadzenPassword @bind-Value="form.Password" Name="Password" AutoComplete="false" />
+            </RadzenFormField>
+            @if (form.Password.Length > 0 || form.IsNew)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenCheckBox @bind-Value="form.MustChangePassword" Name="MustChangePassword" />
+                    <RadzenLabel Text="Must choose a new password at next login" Component="MustChangePassword" />
+                </RadzenStack>
+            }
+        </RadzenStack>
+
+        <RadzenStack Gap="0.5rem">
+            <RadzenFormField Text="@(form.HasCard ? "Replace ID card: scan the new card" : "ID card: scan the card (optional)")" Style="width: 100%">
+                <RadzenPassword @bind-Value="form.CardCode" Name="CardCode" AutoComplete="false" />
+            </RadzenFormField>
+            @if (form.HasCard)
+            {
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                    <RadzenCheckBox @bind-Value="form.RemoveCard" Name="RemoveCard" />
+                    <RadzenLabel Text="Remove the current ID card (lost or returned)" Component="RemoveCard" />
+                </RadzenStack>
+            }
+        </RadzenStack>
+
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close(null))" />
+            <RadzenButton ButtonType="ButtonType.Submit" Text="Save" Icon="save" IsBusy="@busy" Disabled="@busy" />
+        </RadzenStack>
+    </RadzenStack>
+</form>
+
+@code {
+    private record RoleOption(string Value, string Text);
+
+    private static readonly List<RoleOption> roleOptions =
+    [
+        new(Roles.Cashier, "Cashier: checkout and transaction list"),
+        new(Roles.Manager, "Manager: + voids, price changes, reports, items"),
+        new(Roles.SuperAdmin, "Superadmin: everything, including users"),
+    ];
+
+    /// <summary>The user to edit, or null to add one.</summary>
+    [Parameter] public StaffMember? Member { get; set; }
+
+    private UserForm form = new();
+    private List<string> errors = [];
+    private bool busy;
+
+    protected override void OnInitialized()
+    {
+        if (Member is { } m)
+        {
+            form = new UserForm
+            {
+                Id = m.Id, UserName = m.UserName, DisplayName = m.DisplayName, Role = m.Role ?? Roles.Cashier,
+                IsActive = m.IsActive, HasCard = m.HasCard,
+            };
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        try
+        {
+            var actingUserId = (await Auth.GetAuthenticationStateAsync()).User.UserId();
+            errors = (await Staff.SaveAsync(form, actingUserId)).ToList();
+            if (errors.Count == 0) Dialogs.Close(true);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

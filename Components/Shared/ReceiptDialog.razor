@@ -1,0 +1,31 @@
+@using WebPos.Reports
+@inject ReceiptService Receipts
+@inject DialogService Dialogs
+
+@if (receipt is not null)
+{
+    <RadzenStack Gap="1rem" AlignItems="AlignItems.Center">
+        <ReceiptView Receipt="receipt" />
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem" Style="width: 100%">
+            <RadzenLink Path="@($"receipts/{receipt.TransactionId}?print=true")" Target="_blank" Text="Print" Icon="print" class="rz-me-auto" />
+            <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close())" />
+        </RadzenStack>
+    </RadzenStack>
+}
+
+@code {
+    [Parameter] public int TransactionId { get; set; }
+
+    private Receipt? receipt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        receipt = await Receipts.FindAsync(TransactionId);
+        if (receipt is null) Dialogs.Close();
+    }
+
+    public static Task OpenAsync(DialogService dialogs, int transactionId) =>
+        dialogs.OpenAsync<ReceiptDialog>($"Receipt {ReceiptService.Number(transactionId)}",
+            new Dictionary<string, object?> { [nameof(TransactionId)] = transactionId },
+            new DialogOptions { Width = "26rem" });
+}

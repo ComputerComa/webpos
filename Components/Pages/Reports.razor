@@ -1,0 +1,128 @@
+@page "/reports"
+@attribute [Authorize(Policy = Policies.Manage)]
+@using WebPos.Printing
+@using WebPos.Reports
+@inject ReportService ReportService
+@inject IReportPrinter Printer
+@inject IOptions<PrinterOptions> PrinterOptions
+@inject NotificationService Notifications
+@inject StoreClock Clock
+
+<PageTitle>Reports</PageTitle>
+
+<RadzenText TextStyle="TextStyle.H5">Reports</RadzenText>
+
+<RadzenCard class="rz-mb-3">
+    <RadzenStack Gap="1rem">
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.End" Gap="1rem" Wrap="FlexWrap.Wrap">
+            <RadzenFormField Text="Report">
+                <RadzenDropDown TValue="ReportKind" @bind-Value="kind" @bind-Value:after="ClearPreview" Data="@kinds"
+                                TextProperty="Text" ValueProperty="Value" Style="width: 14rem" />
+            </RadzenFormField>
+            @if (ReportService.UsesDateRange(kind))
+            {
+                <RadzenFormField Text="From">
+                    <RadzenDatePicker TValue="DateTime" @bind-Value="from" @bind-Value:after="ClearPreview" DateFormat="yyyy-MM-dd" />
+                </RadzenFormField>
+                <RadzenFormField Text="To">
+                    <RadzenDatePicker TValue="DateTime" @bind-Value="to" @bind-Value:after="ClearPreview" DateFormat="yyyy-MM-dd" />
+                </RadzenFormField>
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.25rem">
+                    <RadzenButton Text="Today" Variant="Variant.Text" Click="@(() => SetRange(0))" />
+                    <RadzenButton Text="Yesterday" Variant="Variant.Text" Click="@(() => SetRange(-1))" />
+                    <RadzenButton Text="This month" Variant="Variant.Text" Click="ThisMonth" />
+                </RadzenStack>
+            }
+        </RadzenStack>
+
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+            <RadzenButton Text="Preview" Icon="visibility" Click="PreviewAsync" IsBusy="@busy" Disabled="@busy" />
+            <RadzenButton Text="Print" Icon="print" ButtonStyle="ButtonStyle.Success" Click="PrintAsync" IsBusy="@busy" Disabled="@busy" />
+            <RadzenLink Path="@DownloadUrl" Text="Download .txt" Icon="download" Target="_blank" />
+            <RadzenText TextStyle="TextStyle.Caption" class="rz-m-0 printer-info">
+                @PrinterOptions.Value.Name &middot; @Printer.Description &middot;
+                @PrinterOptions.Value.Width columns &times; @PrinterOptions.Value.LinesPerPage lines
+            </RadzenText>
+        </RadzenStack>
+    </RadzenStack>
+</RadzenCard>
+
+@if (pages is not null)
+{
+    <div class="report-preview">
+        @for (var i = 0; i < pages.Length; i++)
+        {
+            <pre class="report-page" style="width: @(PrinterOptions.Value.Width + 4)ch">@pages[i]</pre>
+            @if (i < pages.Length - 1)
+            {
+                <div class="page-break">form feed &middot; page @(i + 2)</div>
+            }
+        }
+    </div>
+}
+
+@code {
+    private readonly List<KindOption> kinds = Enum.GetValues<ReportKind>().Select(k => new KindOption(k, ReportService.Title(k))).ToList();
+
+    private ReportKind kind = ReportKind.SalesSummary;
+    private DateTime from;
+    private DateTime to;
+    private string[]? pages;
+    private bool busy;
+
+    private record KindOption(ReportKind Value, string Text);
+
+    private ReportRequest Request => new(kind, DateOnly.FromDateTime(from), DateOnly.FromDateTime(to));
+
+    private string DownloadUrl => $"reports/{kind}.txt?from={Request.From:yyyy-MM-dd}&to={Request.To:yyyy-MM-dd}";
+
+    protected override void OnInitialized() => from = to = Clock.Now.Date;
+
+    private void ClearPreview() => pages = null;
+
+    private void SetRange(int daysFromToday)
+    {
+        from = to = Clock.Now.Date.AddDays(daysFromToday);
+        ClearPreview();
+    }
+
+    private void ThisMonth()
+    {
+        to = Clock.Now.Date;
+        from = new DateTime(to.Year, to.Month, 1);
+        ClearPreview();
+    }
+
+    private async Task PreviewAsync()
+    {
+        busy = true;
+        try
+        {
+            var text = await ReportService.BuildAsync(Request);
+            pages = text.TrimEnd(TextReportWriter.FormFeed).Split(TextReportWriter.FormFeed).Select(p => p.Replace("\r\n", "\n")).ToArray();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task PrintAsync()
+    {
+        busy = true;
+        try
+        {
+            var text = await ReportService.BuildAsync(Request);
+            await Printer.PrintAsync(ReportService.Title(kind), text);
+            Notifications.Notify(NotificationSeverity.Success, "Sent to printer", $"{ReportService.Title(kind)} → {Printer.Description}");
+        }
+        catch (Exception ex)
+        {
+            Notifications.Notify(NotificationSeverity.Error, "Printing failed", ex.Message, 10000);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

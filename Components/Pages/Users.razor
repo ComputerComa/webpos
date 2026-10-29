@@ -1,0 +1,70 @@
+@page "/users"
+@attribute [Authorize(Policy = Policies.Admin)]
+@inject StaffService Staff
+@inject DialogService Dialogs
+@inject NotificationService Notifications
+
+<PageTitle>Users</PageTitle>
+
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-3">
+    <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">Users</RadzenText>
+    <RadzenButton Text="Add user" Icon="person_add" Click="@(() => EditAsync(null))" />
+</RadzenStack>
+
+<RadzenDataGrid TItem="StaffMember" Data="@users" AllowSorting="true" Density="Density.Compact" EmptyText="No users."
+                RowClick="@(args => EditAsync(args.Data!))" class="clickable-rows users-grid">
+    <Columns>
+        <RadzenDataGridColumn Property="@nameof(StaffMember.DisplayName)" Title="Name" />
+        <RadzenDataGridColumn Property="@nameof(StaffMember.UserName)" Title="User name" />
+        <RadzenDataGridColumn Property="@nameof(StaffMember.Role)" Title="Role" Width="140px" />
+        <RadzenDataGridColumn Property="@nameof(StaffMember.HasCard)" Title="ID card" Width="100px" TextAlign="TextAlign.Center">
+            <Template Context="user">
+                @if (user.HasCard)
+                {
+                    <RadzenIcon Icon="badge" title="An ID card is assigned" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Title="Status" Width="200px" Sortable="false">
+            <Template Context="user">
+                @if (!user.IsActive)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Danger" Text="Deactivated" />
+                }
+                else
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Success" Text="Active" />
+                }
+                @if (user.IsLockedOut)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Warning" Text="Locked out" class="rz-ms-1" />
+                }
+                @if (user.MustChangePassword)
+                {
+                    <RadzenBadge BadgeStyle="BadgeStyle.Info" Variant="Variant.Outlined" Text="Temp. password" class="rz-ms-1" />
+                }
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+<RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2 muted">
+    Users are deactivated rather than deleted, so their sales keep their name. Setting a new password also unlocks a locked-out account.
+</RadzenText>
+
+@code {
+    private List<StaffMember> users = [];
+
+    protected override async Task OnInitializedAsync() => users = await Staff.ListAsync();
+
+    private async Task EditAsync(StaffMember? member)
+    {
+        object? saved = await Dialogs.OpenAsync<UserDialog>(member is null ? "Add user" : $"Edit {member.DisplayName}",
+            new Dictionary<string, object?> { [nameof(UserDialog.Member)] = member },
+            new DialogOptions { Width = "32rem", CloseDialogOnOverlayClick = false });
+        if (saved is not true) return;
+
+        Notifications.Notify(NotificationSeverity.Success, member is null ? "User added" : "User saved");
+        users = await Staff.ListAsync();
+    }
+}

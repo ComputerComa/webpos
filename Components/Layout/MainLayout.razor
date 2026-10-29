@@ -1,0 +1,114 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using System.Security.Claims
+@inject IOptions<StoreOptions> Store
+@inject IDbContextFactory<PosDbContext> DbFactory
+@inject TimeClock TimeClock
+@inject StoreClock StoreClock
+@inject DialogService Dialogs
+
+<RadzenComponents />
+
+<RadzenLayout class="pos-layout">
+    <RadzenHeader>
+        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-px-2">
+            <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                <RadzenSidebarToggle Click="@(() => sidebarExpanded = !sidebarExpanded)" />
+                <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">@Store.Value.Name</RadzenText>
+            </RadzenStack>
+            <AuthorizeView>
+                <Authorized>
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.25rem">
+                        <RadzenIcon Icon="account_circle" />
+                        <RadzenText TextStyle="TextStyle.Body1" class="rz-m-0">@context.User.DisplayName()</RadzenText>
+                        <RadzenBadge BadgeStyle="BadgeStyle.Base" Variant="Variant.Outlined" Text="@context.User.Role()" class="rz-me-2 role-badge" />
+                        @if (TimeClock.OpenShift is { } shift)
+                        {
+                            <RadzenBadge BadgeStyle="BadgeStyle.Success" Variant="Variant.Flat" class="clock-status"
+                                         Text="@($"On the clock since {StoreClock.ToLocal(shift.ClockIn):t}")" />
+                            <RadzenButton Text="Clock out" Icon="timer_off" Variant="Variant.Text" Size="ButtonSize.Small" Click="ClockOutAsync" class="rz-me-2" />
+                        }
+                        else
+                        {
+                            <RadzenButton Text="Clock in" Icon="timer" ButtonStyle="ButtonStyle.Success" Size="ButtonSize.Small"
+                                          Click="TimeClock.ClockInAsync" class="rz-me-2 clock-in-button" />
+                        }
+                        <RadzenLink Path="Account/ChangePassword" Text="Change password" class="rz-me-2" />
+                        <form action="Account/Logout" method="post" class="logout-form">
+                            <AntiforgeryToken />
+                            <RadzenButton ButtonType="ButtonType.Submit" Text="Log out" Icon="logout" Variant="Variant.Text" Size="ButtonSize.Small" />
+                        </form>
+                    </RadzenStack>
+                </Authorized>
+            </AuthorizeView>
+        </RadzenStack>
+    </RadzenHeader>
+    @* The toggle switches between icons with text and an icon-only strip; the sidebar itself never disappears. *@
+    <RadzenSidebar Expanded="true" Responsive="false" Style="@(sidebarExpanded ? null : "width: max-content")">
+        <RadzenPanelMenu DisplayStyle="@(sidebarExpanded ? MenuItemDisplayStyle.IconAndText : MenuItemDisplayStyle.Icon)" ShowArrow="false">
+            <AuthorizeView Policy="@Policies.Sell">
+                <RadzenPanelMenuItem Text="Checkout" Icon="point_of_sale" Path="" title="Checkout" />
+                <RadzenPanelMenuItem Text="Transactions" Icon="receipt_long" Path="transactions" title="Transactions" />
+            </AuthorizeView>
+            <AuthorizeView Policy="@Policies.Manage">
+                <RadzenPanelMenuItem Text="Reports" Icon="print" Path="reports" title="Reports" />
+                <RadzenPanelMenuItem Text="Items" Icon="inventory_2" Path="items" title="Items" />
+            </AuthorizeView>
+            <AuthorizeView Policy="@Policies.Admin">
+                <RadzenPanelMenuItem Text="Users" Icon="manage_accounts" Path="users" title="Users" />
+            </AuthorizeView>
+        </RadzenPanelMenu>
+    </RadzenSidebar>
+    <RadzenBody>
+        <div class="rz-p-4">
+            @if (mustChangePassword)
+            {
+                <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" class="rz-mb-3">
+                    You are still using the default password.
+                    <a href="Account/ChangePassword?returnUrl=%2F">Change it now</a>.
+                </RadzenAlert>
+            }
+            @Body
+        </div>
+    </RadzenBody>
+</RadzenLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private bool sidebarExpanded = true;
+    private bool mustChangePassword;
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthenticationState { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthenticationState is null) return;
+        var userId = (await AuthenticationState).User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (userId is null) return;
+
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            mustChangePassword = await db.Users.AnyAsync(u => u.Id == userId && u.MustChangePassword);
+        }
+        TimeClock.Changed += OnClockChanged;
+        await TimeClock.LoadAsync(userId);
+    }
+
+    private void OnClockChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task ClockOutAsync()
+    {
+        var worked = TimeClock.Elapsed;
+        var confirmed = await Dialogs.Confirm($"Clock out after {(int)worked.TotalHours}:{worked.Minutes:00} on the clock? You can't make sales until you clock in again.",
+            "Clock out", new ConfirmOptions { OkButtonText = "Clock out", CancelButtonText = "Stay clocked in" });
+        if (confirmed == true) await TimeClock.ClockOutAsync();
+    }
+
+    public void Dispose() => TimeClock.Changed -= OnClockChanged;
+}

@@ -1,0 +1,72 @@
+@inject DialogService Dialogs
+
+<form @onsubmit="Complete">
+    <RadzenStack Gap="1rem">
+        <div class="pay-total">
+            <span>Total due</span>
+            <strong>@Total.ToString("C")</strong>
+        </div>
+
+        <RadzenSelectBar TValue="PaymentMethod" @bind-Value="method" Size="ButtonSize.Large" Style="width: 100%">
+            <Items>
+                <RadzenSelectBarItem Text="Cash" Value="PaymentMethod.Cash" Icon="payments" />
+                <RadzenSelectBarItem Text="Card" Value="PaymentMethod.Card" Icon="credit_card" />
+                <RadzenSelectBarItem Text="Other" Value="PaymentMethod.Other" Icon="more_horiz" />
+            </Items>
+        </RadzenSelectBar>
+
+        @if (method == PaymentMethod.Cash)
+        {
+            <RadzenFormField Text="Amount tendered" Style="width: 100%">
+                <RadzenNumeric TValue="decimal" @bind-Value="tendered" Immediate="true" Min="0" Format="0.00" ShowUpDown="false"
+                               TextAlign="TextAlign.Right" Style="font-size: 1.5rem" />
+            </RadzenFormField>
+
+            <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" Wrap="FlexWrap.Wrap">
+                @foreach (var amount in QuickAmounts())
+                {
+                    <RadzenButton Text="@(amount == Total ? "Exact" : amount.ToString("C0"))" ButtonStyle="ButtonStyle.Light"
+                                  Click="@(() => tendered = amount)" />
+                }
+            </RadzenStack>
+
+            <div class="pay-total @(Change < 0 ? "short" : "")">
+                <span>@(Change < 0 ? "Still due" : "Change")</span>
+                <strong>@Math.Abs(Change).ToString("C")</strong>
+            </div>
+        }
+
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem">
+            <RadzenButton Text="Cancel" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close(null))" />
+            <RadzenButton ButtonType="ButtonType.Submit" Text="Complete sale" Icon="check" ButtonStyle="ButtonStyle.Success" Disabled="@(!CanComplete)" />
+        </RadzenStack>
+    </RadzenStack>
+</form>
+
+@code {
+    public record Result(PaymentMethod Method, decimal Tendered);
+
+    [Parameter] public decimal Total { get; set; }
+
+    private PaymentMethod method = PaymentMethod.Cash;
+    private decimal tendered;
+
+    private decimal Change => tendered - Total;
+
+    private bool CanComplete => method != PaymentMethod.Cash || tendered >= Total;
+
+    protected override void OnInitialized() => tendered = Total;
+
+    /// <summary>"Exact" plus the next few banknote amounts above the total.</summary>
+    private IEnumerable<decimal> QuickAmounts() =>
+        new[] { 5m, 10m, 20m, 50m, 100m }
+            .Select(note => Math.Ceiling(Total / note) * note)
+            .Where(amount => amount > Total)
+            .Prepend(Total)
+            .Distinct();
+
+    private void Complete()
+    {
+        if (CanComplete) Dialogs.Close(new Result(method, method == PaymentMethod.Cash ? tendered : Total));
+    }
+}

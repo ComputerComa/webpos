@@ -1,0 +1,145 @@
+@page "/Account/Login"
+@inject SignInManager<PosUser> SignInManager
+@inject UserManager<PosUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Login> Logger
+
+<PageTitle>Log in</PageTitle>
+
+<RadzenText TextStyle="TextStyle.H6" class="rz-mb-3">Log in</RadzenText>
+
+@if (errorMessage is not null)
+{
+    <RadzenAlert AlertStyle="AlertStyle.Danger" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small">
+        @errorMessage
+    </RadzenAlert>
+}
+
+@* Card readers type the code and press Enter, so this field has the focus when the page opens. *@
+<EditForm Model="Card" method="post" OnValidSubmit="LoginWithCardAsync" FormName="card" class="rz-mb-3">
+    <div class="account-field">
+        <label for="Card.Code">Scan your ID card</label>
+        <InputText type="password" @bind-Value="Card.Code" id="Card.Code" class="rz-textbox" autocomplete="off" autofocus />
+    </div>
+</EditForm>
+
+<div class="account-divider rz-mb-3"><span>or use your user name</span></div>
+
+<EditForm Model="Input" method="post" OnValidSubmit="LoginAsync" FormName="login">
+    <DataAnnotationsValidator />
+    <RadzenStack Gap="1rem">
+        <div class="account-field">
+            <label for="Input.UserName">User name</label>
+            <InputText @bind-Value="Input.UserName" id="Input.UserName" class="rz-textbox" autocomplete="username" />
+            <ValidationMessage For="() => Input.UserName" class="account-error" />
+        </div>
+        <div class="account-field">
+            <label for="Input.Password">Password</label>
+            <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="rz-textbox" autocomplete="current-password" />
+            <ValidationMessage For="() => Input.Password" class="account-error" />
+        </div>
+        <RadzenButton ButtonType="ButtonType.Submit" Text="Log in" Icon="login" Size="ButtonSize.Large" Style="width: 100%" />
+    </RadzenStack>
+</EditForm>
+
+@code {
+    private const string Disabled = "This account has been deactivated. Ask an administrator.";
+    private const string LockedOut = "Too many failed attempts. Try again in a few minutes.";
+
+    private string? errorMessage;
+
+    [SupplyParameterFromForm(FormName = "login")]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "card")]
+    private CardModel Card { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override void OnInitialized()
+    {
+        Input ??= new();
+        Card ??= new();
+    }
+
+    private async Task LoginAsync()
+    {
+        var userName = Input.UserName.Trim();
+        var result = await SignInManager.PasswordSignInAsync(userName, Input.Password, isPersistent: false, lockoutOnFailure: true);
+
+        if (result.IsLockedOut)
+        {
+            Logger.LogWarning("User {UserName} is locked out.", userName);
+            errorMessage = LockedOut;
+        }
+        else if (result.IsNotAllowed)
+        {
+            // Deactivated. Only say so to someone who knows the password.
+            var user = await UserManager.FindByNameAsync(userName);
+            errorMessage = user is not null && await UserManager.CheckPasswordAsync(user, Input.Password)
+                ? Disabled
+                : "Invalid user name or password.";
+        }
+        else if (!result.Succeeded)
+        {
+            errorMessage = "Invalid user name or password.";
+        }
+        else
+        {
+            Logger.LogInformation("User {UserName} logged in.", userName);
+            RedirectAfterSignIn(await UserManager.FindByNameAsync(userName));
+        }
+    }
+
+    private async Task LoginWithCardAsync()
+    {
+        var code = Card.Code.Trim();
+        if (code.Length == 0) return;
+
+        var hash = IdCard.Hash(code);
+        var user = await UserManager.Users.FirstOrDefaultAsync(u => u.CardHash == hash);
+        if (user is null)
+        {
+            Logger.LogWarning("Unknown ID card scanned at the login page.");
+            errorMessage = "ID card not recognized.";
+        }
+        else if (await UserManager.IsLockedOutAsync(user))
+        {
+            errorMessage = LockedOut;
+        }
+        else if (!await SignInManager.CanSignInAsync(user))
+        {
+            errorMessage = Disabled;
+        }
+        else
+        {
+            // SignInAsync skips the checks PasswordSignInAsync makes, which is why they are done above.
+            await SignInManager.SignInAsync(user, isPersistent: false, authenticationMethod: "idcard");
+            Logger.LogInformation("User {UserName} logged in with an ID card.", user.UserName);
+            RedirectAfterSignIn(user);
+        }
+    }
+
+    private void RedirectAfterSignIn(PosUser? user)
+    {
+        if (user is { MustChangePassword: true })
+            RedirectManager.RedirectTo("Account/ChangePassword", new() { ["returnUrl"] = ReturnUrl });
+        else
+            RedirectManager.RedirectTo(ReturnUrl);
+    }
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "Enter your user name.")]
+        public string UserName { get; set; } = "";
+
+        [Required(ErrorMessage = "Enter your password.")]
+        public string Password { get; set; } = "";
+    }
+
+    private sealed class CardModel
+    {
+        public string Code { get; set; } = "";
+    }
+}

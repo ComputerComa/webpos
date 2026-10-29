@@ -1,0 +1,48 @@
+@page "/receipts/{Id:int}"
+@layout PrintLayout
+@attribute [Authorize(Policy = Policies.Sell)]
+@using WebPos.Reports
+@inject ReceiptService Receipts
+@inject IJSRuntime JS
+
+<PageTitle>Receipt @ReceiptService.Number(Id)</PageTitle>
+
+<div class="print-toolbar no-print">
+    <a href="transactions">Back to transactions</a>
+    <button type="button" class="rz-button rz-button-md rz-variant-filled rz-primary rz-shade-default" onclick="window.print()">Print</button>
+</div>
+
+@if (receipt is not null)
+{
+    <ReceiptView Receipt="receipt" />
+}
+else if (loaded)
+{
+    <p>There is no receipt @ReceiptService.Number(Id).</p>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    /// <summary>Opens the browser's print dialog as soon as the receipt is shown.</summary>
+    [SupplyParameterFromQuery] public bool Print { get; set; }
+
+    private Receipt? receipt;
+    private bool loaded;
+    private bool printed;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        receipt = await Receipts.FindAsync(Id);
+        loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Print && receipt is not null && !printed)
+        {
+            printed = true;
+            await JS.InvokeVoidAsync("print");
+        }
+    }
+}

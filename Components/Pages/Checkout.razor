@@ -1,0 +1,394 @@
+@page "/"
+@attribute [Authorize(Policy = Policies.Sell)]
+@implements IDisposable
+@using System.Security.Claims
+@using System.Text.RegularExpressions
+@using WebPos.Reports
+@inject IDbContextFactory<PosDbContext> DbFactory
+@inject CheckoutService Sales
+@inject PosSession Session
+@inject NotificationService Notifications
+@inject DialogService Dialogs
+@inject ManagerApprovals Approvals
+@inject TimeClock TimeClock
+@inject ReceiptService Receipts
+@inject TimeProvider Time
+@inject IOptions<StoreOptions> Store
+@inject StoreClock Clock
+
+<PageTitle>Checkout</PageTitle>
+
+@{ var totals = Cart.Totals(Store.Value.TaxRate); }
+
+<RadzenRow Gap="1rem">
+    <RadzenColumn Size="12" SizeLG="7">
+        <RadzenStack Gap="1rem">
+            <RadzenCard>
+                <form class="scan-form" @onsubmit="ScanAsync">
+                    <input @ref="scanInput" class="rz-textbox scan-input" autocomplete="off"
+                           placeholder="Scan a barcode (or 3*barcode) and press Enter"
+                           @bind="scanText" @bind:event="oninput" />
+                    <RadzenButton ButtonType="ButtonType.Submit" Icon="add_shopping_cart" Text="Add" />
+                </form>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1.5rem" class="rz-mt-2" Wrap="FlexWrap.Wrap">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                        <RadzenSwitch @bind-Value="Game.IsOn" @bind-Value:after="GameToggledAsync" Name="CustomerMode" />
+                        <RadzenLabel Text="Customer mode (practice game)" Component="CustomerMode" />
+                    </RadzenStack>
+                    @if (Game.IsOn)
+                    {
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="0.5rem">
+                            <RadzenCheckBox @bind-Value="Game.Twists" @bind-Value:after="@(() => focusScan = true)" Name="Twists" />
+                            <RadzenLabel Text="Twists (coupons, smudged barcodes, change of mind)" Component="Twists" />
+                        </RadzenStack>
+                        <RadzenLink Path="items/barcodes" Target="_blank" Text="Barcode sheet" Icon="qr_code_2" />
+                    }
+                </RadzenStack>
+            </RadzenCard>
+
+            @if (Game.IsOn)
+            {
+                <RadzenCard class="customer-panel">
+                    <CustomerPanel Game="Game" Cart="Cart" OnNextCustomer="NextCustomer" />
+                </RadzenCard>
+            }
+            else
+            {
+                <RadzenCard>
+                    <RadzenTextBox @bind-Value="search" @bind-Value:after="ApplyFilter" Immediate="true"
+                                   Placeholder="Search items by name, category or barcode" Style="width: 100%" class="rz-mb-2" />
+                    <RadzenDataGrid TItem="Item" Data="@filteredItems" AllowPaging="true" PageSize="10" Density="Density.Compact"
+                                    RowClick="@(args => AddItem(args.Data!))" class="item-picker" EmptyText="No items found.">
+                        <Columns>
+                            <RadzenDataGridColumn Property="@nameof(Item.Name)" Title="Item" />
+                            <RadzenDataGridColumn Property="@nameof(Item.Category)" Title="Category" Width="140px" />
+                            <RadzenDataGridColumn Property="@nameof(Item.Barcode)" Title="Barcode" Width="150px" />
+                            <RadzenDataGridColumn Property="@nameof(Item.Price)" Title="Price" FormatString="{0:C}" TextAlign="TextAlign.Right" Width="110px" />
+                        </Columns>
+                    </RadzenDataGrid>
+                </RadzenCard>
+            }
+        </RadzenStack>
+    </RadzenColumn>
+
+    <RadzenColumn Size="12" SizeLG="5">
+        <RadzenStack Gap="1rem">
+            <RadzenCard>
+                <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-2">
+                    <RadzenText TextStyle="TextStyle.H6" class="rz-m-0">Current sale</RadzenText>
+                    <RadzenText TextStyle="TextStyle.Body2" class="rz-m-0 muted cashier-name">Cashier: @user.DisplayName()</RadzenText>
+                </RadzenStack>
+
+                @if (!TimeClock.IsClockedIn)
+                {
+                    <RadzenAlert AlertStyle="AlertStyle.Warning" Variant="Variant.Flat" Shade="Shade.Lighter" AllowClose="false" Size="AlertSize.Small" class="rz-mb-2 clocked-out">
+                        <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" Gap="0.5rem">
+                            <span>You're not clocked in, so you can't take payment.</span>
+                            <RadzenButton Text="Clock in" Icon="timer" ButtonStyle="ButtonStyle.Success" Size="ButtonSize.Small" Click="ClockInAsync" />
+                        </RadzenStack>
+                    </RadzenAlert>
+                }
+
+                @if (Cart.IsEmpty)
+                {
+                    <p class="cart-empty">Scan or pick an item to start a sale.</p>
+                }
+                else
+                {
+                    <table class="cart-table">
+                        <thead>
+                            <tr><th>Item</th><th class="num">Price</th><th class="qty">Qty</th><th class="num">Amount</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var line in Cart.Lines)
+                            {
+                                <tr @key="line">
+                                    <td>@line.Name</td>
+                                    <td class="num">
+                                        <button type="button" class="price-button @(line.PriceOverride is null ? "" : "overridden")"
+                                                title="Change price" @onclick="() => ChangePriceAsync(line)">@line.UnitPrice.ToString("C")</button>
+                                        @if (line.PriceOverride is not null)
+                                        {
+                                            <span class="was-price" title="Approved by @line.OverrideApprovedBy?.Name">@line.CatalogPrice.ToString("C")</span>
+                                        }
+                                    </td>
+                                    <td class="qty">
+                                        <RadzenButton Icon="remove" Size="ButtonSize.ExtraSmall" Variant="Variant.Text" Click="@(() => RemoveAsync(line, 1))" />
+                                        <span class="qty-value">@line.Quantity</span>
+                                        @if (line.PriceOverride is null)
+                                        {
+                                            <RadzenButton Icon="add" Size="ButtonSize.ExtraSmall" Variant="Variant.Text" Click="@(() => AddOne(line))" />
+                                        }
+                                    </td>
+                                    <td class="num">@line.LineTotal.ToString("C")</td>
+                                    <td class="actions">
+                                        <RadzenButton Icon="delete" Size="ButtonSize.ExtraSmall" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger"
+                                                      Click="@(() => RemoveAsync(line, line.Quantity))" />
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+
+                <div class="totals">
+                    <div><span>Items</span><span>@Cart.ItemCount</span></div>
+                    @if (Store.Value.TaxRate != 0)
+                    {
+                        <div><span>Subtotal</span><span>@totals.Subtotal.ToString("C")</span></div>
+                        <div><span>Tax (@Store.Value.TaxRate.ToString("0.###%"))</span><span>@totals.Tax.ToString("C")</span></div>
+                    }
+                    <div class="grand-total"><span>Total</span><span>@totals.Total.ToString("C")</span></div>
+                </div>
+
+                <RadzenStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="rz-mt-3">
+                    <RadzenButton Text="Pay" Icon="payments" Size="ButtonSize.Large" ButtonStyle="ButtonStyle.Success" Style="flex: 1"
+                                  Disabled="@(Cart.IsEmpty || !TimeClock.IsClockedIn)" Click="PayAsync" />
+                    <RadzenButton Text="Clear" Icon="remove_shopping_cart" Size="ButtonSize.Large" ButtonStyle="ButtonStyle.Light"
+                                  Disabled="@Cart.IsEmpty" Click="ClearAsync" />
+                </RadzenStack>
+                @if (!user.CanManage() && !Cart.IsEmpty)
+                {
+                    <RadzenText TextStyle="TextStyle.Caption" class="rz-mt-2 muted">Removing items or changing a price needs a manager's approval.</RadzenText>
+                }
+            </RadzenCard>
+
+            @if (Session.LastSale is { } sale)
+            {
+                <RadzenCard class="last-sale">
+                    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween">
+                        <RadzenText TextStyle="TextStyle.Subtitle2" class="rz-m-0">
+                            Last sale #@sale.Id &middot; @Clock.ToLocal(sale.CreatedAt).ToString("t") &middot; @sale.CashierName
+                        </RadzenText>
+                        <RadzenLink Path="@($"receipts/{sale.Id}?print=true")" Target="_blank" Text="Print receipt" Icon="print" />
+                    </RadzenStack>
+                    <div class="totals">
+                        <div class="grand-total"><span>Change</span><span>@sale.ChangeDue.ToString("C")</span></div>
+                    </div>
+                    <ReceiptView Receipt="@Receipts.Build(sale)" />
+                </RadzenCard>
+            }
+        </RadzenStack>
+    </RadzenColumn>
+</RadzenRow>
+
+@code {
+    private ElementReference scanInput;
+    private bool focusScan = true;
+    private string scanText = "";
+    private string search = "";
+    private List<Item> items = [];
+    private List<Item> filteredItems = [];
+    private ClaimsPrincipal user = new();
+
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthenticationState { get; set; } = default!;
+
+    private Cart Cart => Session.Cart;
+    private CustomerGame Game => Session.Game;
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = (await AuthenticationState).User;
+        TimeClock.Changed += OnClockChanged;
+        await TimeClock.LoadAsync(user.UserId());
+        await using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.Items.AsNoTracking().Where(i => i.IsActive).OrderBy(i => i.Name).ToListAsync();
+        ApplyFilter();
+    }
+
+    private void OnClockChanged()
+    {
+        focusScan = true; // the header's Clock in/out button took the focus and then disappeared
+        InvokeAsync(StateHasChanged);
+    }
+
+    private Task GameToggledAsync()
+    {
+        if (Game.IsOn && Game.Current is null && Game.LastResult is null) NextCustomer();
+        focusScan = true;
+        return Task.CompletedTask;
+    }
+
+    private void NextCustomer()
+    {
+        try
+        {
+            Game.NextCustomer(new CustomerGenerator(items, Store.Value.TaxRate, Random.Shared), Time.GetUtcNow().UtcDateTime);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Notifications.Notify(NotificationSeverity.Warning, "No customers", ex.Message);
+            Game.IsOn = false;
+        }
+        focusScan = true;
+    }
+
+    public void Dispose() => TimeClock.Changed -= OnClockChanged;
+
+    private async Task ClockInAsync()
+    {
+        await TimeClock.ClockInAsync();
+        focusScan = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusScan)
+        {
+            focusScan = false;
+            await scanInput.FocusAsync();
+        }
+    }
+
+    private void ApplyFilter()
+    {
+        var term = search.Trim();
+        filteredItems = term.Length == 0
+            ? items
+            : items.Where(i => i.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+                               || (i.Category?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+                               || (i.Barcode?.Contains(term) ?? false)).ToList();
+    }
+
+    private async Task ScanAsync()
+    {
+        var text = scanText.Trim();
+        scanText = "";
+        focusScan = true;
+        if (text.Length == 0)
+        {
+            if (Game.IsOn && Game.Current is null) NextCustomer(); // Enter on an empty scan box calls the next customer
+            return;
+        }
+
+        var quantity = 1;
+        var match = Regex.Match(text, @"^(\d{1,4})\s*\*\s*(.+)$");
+        if (match.Success)
+        {
+            quantity = int.Parse(match.Groups[1].Value);
+            text = match.Groups[2].Value.Trim();
+            if (quantity < 1)
+            {
+                Notifications.Notify(NotificationSeverity.Warning, "Invalid quantity", "Quantity must be at least 1.");
+                return;
+            }
+        }
+
+        var item = await Sales.FindByBarcodeAsync(text);
+        if (item is null)
+        {
+            Notifications.Notify(NotificationSeverity.Error, "Unknown barcode", text, 4000);
+            return;
+        }
+        AddItem(item, quantity);
+    }
+
+    private void AddItem(Item item, int quantity = 1)
+    {
+        Cart.Add(item, quantity);
+        focusScan = true;
+    }
+
+    private void AddOne(CartLine line)
+    {
+        Cart.SetQuantity(line, line.Quantity + 1);
+        focusScan = true;
+    }
+
+    // The handlers below set focusScan only once their dialogs have closed. Setting it earlier would move the focus
+    // to the scan box behind the dialog when the page re-renders, and a manager's card swipe would land there.
+
+    /// <summary>Voiding scanned items is a manager's call.</summary>
+    private async Task RemoveAsync(CartLine line, int quantity)
+    {
+        try
+        {
+            if (await Approvals.RequestAsync($"Remove {quantity} x {line.Name} from the sale.") is null) return;
+            Cart.SetQuantity(line, line.Quantity - quantity);
+        }
+        finally
+        {
+            focusScan = true;
+        }
+    }
+
+    private async Task ChangePriceAsync(CartLine line)
+    {
+        try
+        {
+            await ChangePriceCoreAsync(line);
+        }
+        finally
+        {
+            focusScan = true;
+        }
+    }
+
+    private async Task ChangePriceCoreAsync(CartLine line)
+    {
+        object? result = await Dialogs.OpenAsync<PriceDialog>($"Price of {line.Name}",
+            new Dictionary<string, object?>
+            {
+                [nameof(PriceDialog.CatalogPrice)] = line.CatalogPrice,
+                [nameof(PriceDialog.CurrentOverride)] = line.PriceOverride,
+            },
+            new DialogOptions { Width = "24rem", CloseDialogOnOverlayClick = false });
+        if (result is not PriceDialog.Result { Price: var price }) return;
+
+        if (price is null || price == line.CatalogPrice)
+        {
+            Cart.ClearOverride(line); // back to the regular price: nothing to approve
+            return;
+        }
+        var approver = await Approvals.RequestAsync($"Change the price of {line.Name} from {line.CatalogPrice:C} to {price:C}.");
+        if (approver is not null) Cart.OverridePrice(line, price.Value, approver);
+    }
+
+    private async Task ClearAsync()
+    {
+        try
+        {
+            var confirmed = await Dialogs.Confirm("Remove all items from the current sale?", "Clear sale",
+                new ConfirmOptions { OkButtonText = "Clear", CancelButtonText = "Keep" });
+            if (confirmed != true) return;
+            if (await Approvals.RequestAsync($"Clear the sale ({Cart.ItemCount} items).") is null) return;
+            Cart.Clear();
+        }
+        finally
+        {
+            focusScan = true;
+        }
+    }
+
+    private async Task PayAsync()
+    {
+        if (Cart.IsEmpty) return;
+
+        var expectedTotal = Cart.Totals(Store.Value.TaxRate).Total;
+        object? result = await Dialogs.OpenAsync<PaymentDialog>("Payment",
+            new Dictionary<string, object?> { [nameof(PaymentDialog.Total)] = expectedTotal },
+            new DialogOptions { Width = "30rem", CloseDialogOnOverlayClick = false });
+        focusScan = true;
+        if (result is not PaymentDialog.Result payment) return;
+
+        try
+        {
+            var lines = Cart.Lines.Select(l => new CheckoutLine(l.ItemId, l.Quantity, l.PriceOverride, l.OverrideApprovedBy?.UserId)).ToList();
+            var sale = await Sales.CompleteSaleAsync(new CheckoutRequest(user.UserId(), payment.Method, payment.Tendered, lines));
+            Session.LastSale = sale;
+            Cart.Clear();
+            if (Game.IsOn && Game.Current is not null) Game.Finish(sale, Time.GetUtcNow().UtcDateTime);
+
+            if (sale.Total != expectedTotal)
+                Notifications.Notify(NotificationSeverity.Warning, "Prices changed",
+                    $"Item prices changed during the sale; the current prices were charged ({sale.Total:C}).", 10000);
+            Notifications.Notify(NotificationSeverity.Success, $"Sale #{sale.Id} completed",
+                sale.ChangeDue > 0 ? $"Change due: {sale.ChangeDue:C}" : "");
+        }
+        catch (CheckoutException ex)
+        {
+            Notifications.Notify(NotificationSeverity.Error, "Sale not completed", ex.Message, 8000);
+        }
+    }
+}

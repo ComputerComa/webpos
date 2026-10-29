@@ -1,0 +1,507 @@
+html, body {
+    margin: 0;
+}
+
+h1:focus {
+    outline: none;
+}
+
+.pos-layout {
+    height: 100vh;
+}
+
+/* Checkout */
+.scan-form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.scan-input {
+    flex: 1;
+    font-size: 1.4rem;
+    height: 3rem;
+    padding: 0 0.75rem;
+}
+
+.item-picker .rz-data-row,
+.clickable-rows .rz-data-row {
+    cursor: pointer;
+}
+
+.cart-empty {
+    color: var(--rz-text-secondary-color);
+    text-align: center;
+    padding: 2rem 0;
+}
+
+.cart-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.cart-table th,
+.cart-table td {
+    padding: 0.35rem 0.25rem;
+    border-bottom: 1px solid var(--rz-base-200);
+    text-align: left;
+    vertical-align: middle;
+}
+
+.cart-table th {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--rz-text-secondary-color);
+}
+
+.cart-table .num {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.cart-table .qty {
+    text-align: center;
+    white-space: nowrap;
+}
+
+.cart-table .qty-value {
+    display: inline-block;
+    min-width: 2ch;
+    text-align: center;
+    font-weight: 600;
+}
+
+.cart-table .actions {
+    width: 1%;
+}
+
+.muted {
+    color: var(--rz-text-secondary-color);
+}
+
+.totals {
+    margin-top: 0.75rem;
+}
+
+.totals > div {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.15rem 0;
+}
+
+.totals .grand-total {
+    font-size: 1.6rem;
+    font-weight: 700;
+    border-top: 2px solid var(--rz-base-300);
+    margin-top: 0.25rem;
+    padding-top: 0.35rem;
+}
+
+.last-sale .grand-total {
+    color: var(--rz-success);
+}
+
+.pay-total {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 1.25rem;
+}
+
+.pay-total strong {
+    font-size: 2rem;
+}
+
+.pay-total.short strong {
+    color: var(--rz-danger);
+}
+
+/* Reports */
+.printer-info {
+    color: var(--rz-text-secondary-color);
+}
+
+.report-preview {
+    overflow-x: auto;
+    padding-bottom: 1rem;
+}
+
+.report-page {
+    font-family: "Courier New", Courier, monospace;
+    font-size: 0.8rem;
+    line-height: 1.25;
+    background: #fdfdf8;
+    color: #111;
+    border: 1px solid var(--rz-base-300);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    padding: 1rem 2ch;
+    margin: 0;
+    box-sizing: content-box;
+    max-width: none;
+}
+
+.page-break {
+    font-size: 0.75rem;
+    color: var(--rz-text-secondary-color);
+    text-align: center;
+    border-top: 1px dashed var(--rz-base-400);
+    margin: 0.75rem 0;
+    padding-top: 0.25rem;
+}
+
+/* Blazor error UI */
+.blazor-error-boundary {
+    background: #b32121;
+    padding: 1rem;
+    color: white;
+}
+
+.blazor-error-boundary::after {
+    content: "An error has occurred."
+}
+
+/* Account pages (login, change password) */
+.account-page {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    box-sizing: border-box;
+    background: var(--rz-base-background-color);
+}
+
+.account-card {
+    width: 100%;
+    max-width: 24rem;
+}
+
+.account-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.account-field label,
+label.account-field > span {
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.account-field .rz-textbox {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.account-error {
+    color: var(--rz-danger);
+    font-size: 0.8rem;
+}
+
+.account-link-button {
+    width: 100%;
+    margin-top: 1rem;
+    text-decoration: none;
+    justify-content: center;
+    box-sizing: border-box;
+}
+
+.account-secondary-link {
+    text-align: center;
+    font-size: 0.875rem;
+}
+
+.logout-form {
+    margin: 0;
+}
+
+/* "or" between the ID card and password forms */
+.account-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--rz-text-secondary-color);
+    font-size: 0.8rem;
+}
+
+.account-divider::before,
+.account-divider::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--rz-base-300);
+}
+
+/* Cart price cell: click to change the price; an override shows the regular price struck through */
+.price-button {
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    text-decoration: underline dotted;
+}
+
+.price-button.overridden {
+    color: var(--rz-warning-darker);
+    font-weight: 600;
+}
+
+.was-price {
+    display: block;
+    text-decoration: line-through;
+    font-size: 0.75rem;
+    color: var(--rz-text-secondary-color);
+}
+
+/* Barcodes. The SVG is drawn at whole-pixel bar widths; never let CSS scale it. */
+.barcode {
+    display: inline-block;
+    line-height: 0;
+}
+
+.barcode-svg {
+    max-width: none;
+}
+
+.barcode-typed {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    line-height: 1.2;
+    padding: 0.4rem 1rem;
+    border: 2px solid #000;
+    border-radius: 6px;
+    background: #fff;
+    color: #000;
+}
+
+.barcode-typed-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+}
+
+.barcode-typed-code {
+    font-family: monospace;
+    font-size: 1.75rem;
+    font-weight: 700;
+}
+
+/* Pages with PrintLayout (barcode sheet, receipts) */
+.print-page {
+    min-height: 100vh;
+    padding: 1rem;
+    box-sizing: border-box;
+    background: #fff;
+    color: #000;
+}
+
+.print-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.label-sheet {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.5rem;
+}
+
+.label {
+    border: 1px dashed #bbb;
+    padding: 0.5rem;
+    text-align: center;
+    break-inside: avoid;
+}
+
+.label-name {
+    font-weight: 600;
+}
+
+.label-price {
+    margin-bottom: 0.25rem;
+}
+
+@media print {
+    .no-print {
+        display: none !important;
+    }
+
+    .print-page {
+        padding: 0;
+    }
+}
+
+/* Receipts: a strip of till paper */
+.receipt-paper {
+    width: max-content;
+    max-width: 100%;
+    margin: 0.75rem auto 0;
+    padding: 1rem 1.25rem 0.75rem;
+    background: #fffdf7;
+    color: #222;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+    overflow-x: auto;
+}
+
+.receipt-text {
+    margin: 0;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 0.85rem;
+    line-height: 1.35;
+}
+
+.receipt-barcode {
+    text-align: center;
+    margin-top: 0.5rem;
+}
+
+.receipt-search {
+    margin: 0;
+}
+
+@media print {
+    .receipt-paper {
+        box-shadow: none;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+    }
+}
+
+/* Customer mode */
+.game-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.25rem;
+    font-size: 0.85rem;
+    color: var(--rz-text-secondary-color);
+    margin-bottom: 0.75rem;
+}
+
+.customer-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.customer-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    background: var(--rz-primary-lighter);
+    color: var(--rz-primary-darker);
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+
+.customer-name {
+    font-weight: 600;
+}
+
+.customer-says {
+    font-style: italic;
+    color: var(--rz-text-secondary-color);
+}
+
+.customer-pays {
+    margin-left: auto;
+}
+
+.customer-note {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+}
+
+.customer-note.coupon {
+    background: var(--rz-warning-lighter);
+}
+
+.customer-note.put-back {
+    background: var(--rz-danger-lighter);
+}
+
+.basket {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+}
+
+.basket-item {
+    border: 2px solid var(--rz-base-300);
+    border-radius: 8px;
+    padding: 0.5rem;
+    text-align: center;
+    background: var(--rz-base-background-color);
+    overflow-x: auto;
+}
+
+.basket-item.done {
+    border-color: var(--rz-success);
+    background: var(--rz-success-lighter);
+}
+
+.basket-item.over {
+    border-color: var(--rz-danger);
+    background: var(--rz-danger-lighter);
+}
+
+.basket-item-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.5rem;
+    font-weight: 600;
+    text-align: left;
+}
+
+.basket-item-qty {
+    white-space: nowrap;
+}
+
+.basket-item-count {
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.barcode-typed.smudged {
+    border-style: dashed;
+    color: #555;
+}
+
+.game-result {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    border-radius: 8px;
+    background: var(--rz-danger-lighter);
+}
+
+.game-result.perfect {
+    background: var(--rz-success-lighter);
+}
+
+.game-result-points {
+    font-size: 2rem;
+    font-weight: 700;
+}
+
+.game-result-title {
+    font-weight: 600;
+}
+
+.game-result-mistake::before {
+    content: "\2022  ";
+}

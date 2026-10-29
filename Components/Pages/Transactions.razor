@@ -1,0 +1,117 @@
+@page "/transactions"
+@attribute [Authorize(Policy = Policies.Sell)]
+@inject IDbContextFactory<PosDbContext> DbFactory
+@inject DialogService Dialogs
+@inject NotificationService Notifications
+@inject StoreClock Clock
+
+<PageTitle>Transactions</PageTitle>
+
+<RadzenText TextStyle="TextStyle.H5">Transactions</RadzenText>
+
+<RadzenCard class="rz-mb-3">
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.End" Gap="1rem" Wrap="FlexWrap.Wrap">
+        <RadzenFormField Text="From">
+            <RadzenDatePicker TValue="DateTime" @bind-Value="from" DateFormat="yyyy-MM-dd" />
+        </RadzenFormField>
+        <RadzenFormField Text="To">
+            <RadzenDatePicker TValue="DateTime" @bind-Value="to" DateFormat="yyyy-MM-dd" />
+        </RadzenFormField>
+        <RadzenButton Text="Show" Icon="search" Click="LoadAsync" />
+        <form class="receipt-search" @onsubmit="FindReceiptAsync">
+            <RadzenFormField Text="Receipt # (scan or type)">
+                <RadzenTextBox @bind-Value="receiptSearch" Name="ReceiptSearch" autocomplete="off" />
+            </RadzenFormField>
+        </form>
+        <RadzenText TextStyle="TextStyle.Body1" class="rz-m-0">
+            <strong>@completedCount</strong> completed &middot; <strong>@completedTotal.ToString("C")</strong>
+            @if (voidedCount > 0)
+            {
+                <span> &middot; @voidedCount voided</span>
+            }
+        </RadzenText>
+    </RadzenStack>
+</RadzenCard>
+
+<RadzenDataGrid TItem="Row" Data="@rows" AllowPaging="true" PageSize="25" AllowSorting="true" Density="Density.Compact"
+                RowClick="@(args => OpenAsync(args.Data!.Id))" EmptyText="No transactions in this period." class="clickable-rows">
+    <Columns>
+        <RadzenDataGridColumn Property="Id" Title="#" Width="90px" />
+        <RadzenDataGridColumn Property="Time" Title="Time" FormatString="{0:yyyy-MM-dd HH:mm:ss}" Width="180px" />
+        <RadzenDataGridColumn Property="Cashier" Title="Cashier" />
+        <RadzenDataGridColumn Property="PaymentMethod" Title="Payment" Width="120px" />
+        <RadzenDataGridColumn Property="ItemCount" Title="Items" TextAlign="TextAlign.Right" Width="90px" />
+        <RadzenDataGridColumn Property="Total" Title="Total" FormatString="{0:C}" TextAlign="TextAlign.Right" Width="120px" />
+        <RadzenDataGridColumn Property="Status" Title="Status" Width="120px">
+            <Template Context="row">
+                <RadzenBadge Text="@row.Status.ToString()"
+                             BadgeStyle="@(row.Status == TransactionStatus.Voided ? BadgeStyle.Danger : BadgeStyle.Success)" />
+            </Template>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    private record Row(int Id, DateTime Time, string Cashier, PaymentMethod PaymentMethod, int ItemCount, decimal Total, TransactionStatus Status);
+
+    private DateTime from;
+    private DateTime to;
+    private List<Row> rows = [];
+    private int completedCount;
+    private int voidedCount;
+    private decimal completedTotal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        from = to = Clock.Now.Date;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var (startUtc, endUtc) = Clock.ToUtcRange(DateOnly.FromDateTime(from), DateOnly.FromDateTime(to));
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var data = await db.Transactions.AsNoTracking()
+            .Where(t => t.CreatedAt >= startUtc && t.CreatedAt < endUtc)
+            .OrderByDescending(t => t.CreatedAt)
+            .Select(t => new { t.Id, t.CreatedAt, Cashier = t.CashierName, t.PaymentMethod, ItemCount = t.Items.Sum(i => i.Quantity), t.Total, t.Status })
+            .ToListAsync();
+
+        rows = data.Select(t => new Row(t.Id, Clock.ToLocal(t.CreatedAt), t.Cashier, t.PaymentMethod, t.ItemCount, t.Total, t.Status)).ToList();
+        var completed = rows.Where(r => r.Status == TransactionStatus.Completed).ToList();
+        completedCount = completed.Count;
+        completedTotal = completed.Sum(r => r.Total);
+        voidedCount = rows.Count - completedCount;
+    }
+
+    private string receiptSearch = "";
+
+    /// <summary>Opens a sale from its receipt barcode, whatever its date.</summary>
+    private async Task FindReceiptAsync()
+    {
+        var text = receiptSearch;
+        receiptSearch = "";
+        if (WebPos.Reports.ReceiptService.ParseNumber(text) is not int id)
+        {
+            Notifications.Notify(NotificationSeverity.Warning, "Not a receipt number", text);
+            return;
+        }
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            if (!await db.Transactions.AnyAsync(t => t.Id == id))
+            {
+                Notifications.Notify(NotificationSeverity.Warning, "Receipt not found", WebPos.Reports.ReceiptService.Number(id));
+                return;
+            }
+        }
+        await OpenAsync(id);
+    }
+
+    private async Task OpenAsync(int id)
+    {
+        await Dialogs.OpenAsync<TransactionDialog>($"Transaction #{id}",
+            new Dictionary<string, object?> { [nameof(TransactionDialog.TransactionId)] = id },
+            new DialogOptions { Width = "40rem" });
+        await LoadAsync(); // the transaction may have been voided
+    }
+}

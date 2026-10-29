@@ -1,0 +1,36 @@
+@page "/items/barcodes"
+@layout PrintLayout
+@attribute [Authorize(Policy = Policies.Sell)]
+@inject IDbContextFactory<PosDbContext> DbFactory
+
+<PageTitle>Barcode sheet</PageTitle>
+
+<div class="print-toolbar no-print">
+    <a href="/">Back to checkout</a>
+    <button type="button" class="rz-button rz-button-md rz-variant-filled rz-primary rz-shade-default" onclick="window.print()">Print</button>
+    <span class="muted">Scan straight off the screen, or print the sheet if your scanner can't read screens (most laser scanners can't).</span>
+</div>
+
+<div class="label-sheet">
+    @foreach (var item in items)
+    {
+        <div class="label">
+            <div class="label-name">@item.Name</div>
+            <div class="label-price">@item.Price.ToString("C")</div>
+            <Barcode Value="@(item.Barcode!)" />
+        </div>
+    }
+</div>
+
+@code {
+    private List<Item> items = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.Items.AsNoTracking()
+            .Where(i => i.IsActive && i.Barcode != null)
+            .OrderBy(i => i.Category).ThenBy(i => i.Name)
+            .ToListAsync();
+    }
+}

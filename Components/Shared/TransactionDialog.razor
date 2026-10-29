@@ -1,0 +1,100 @@
+@inject IDbContextFactory<PosDbContext> DbFactory
+@inject CheckoutService Sales
+@inject DialogService Dialogs
+@inject ManagerApprovals Approvals
+@inject NotificationService Notifications
+@inject StoreClock Clock
+
+@if (transaction is null)
+{
+    <RadzenProgressBarCircular ShowValue="false" Mode="ProgressBarMode.Indeterminate" />
+}
+else
+{
+    <RadzenStack Gap="1rem">
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.SpaceBetween" Wrap="FlexWrap.Wrap">
+            <span>@Clock.ToLocal(transaction.CreatedAt).ToString("yyyy-MM-dd HH:mm:ss") &middot; @transaction.CashierName &middot; @transaction.PaymentMethod</span>
+            @if (transaction.Status == TransactionStatus.Voided)
+            {
+                <RadzenBadge BadgeStyle="BadgeStyle.Danger"
+                             Text="@($"Voided {(transaction.VoidedAt is { } v ? Clock.ToLocal(v).ToString("yyyy-MM-dd HH:mm") : "")} by {transaction.VoidedBy}")" />
+            }
+        </RadzenStack>
+
+        <table class="cart-table">
+            <thead>
+                <tr><th>Item</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Amount</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var line in transaction.Items)
+                {
+                    <tr>
+                        <td>
+                            @line.Name<br /><small class="muted">@line.Barcode</small>
+                            @if (line.CatalogPrice is { } regular)
+                            {
+                                <br /><small class="muted price-override-note">Price changed from @regular.ToString("C") by @line.PriceOverriddenBy</small>
+                            }
+                        </td>
+                        <td class="num">@line.UnitPrice.ToString("C")</td>
+                        <td class="num">@line.Quantity</td>
+                        <td class="num">@line.LineTotal.ToString("C")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div class="totals">
+            <div><span>Subtotal</span><span>@transaction.Subtotal.ToString("C")</span></div>
+            <div><span>Tax</span><span>@transaction.Tax.ToString("C")</span></div>
+            <div class="grand-total"><span>Total</span><span>@transaction.Total.ToString("C")</span></div>
+            <div><span>Tendered</span><span>@transaction.AmountTendered.ToString("C")</span></div>
+            <div><span>Change</span><span>@transaction.ChangeDue.ToString("C")</span></div>
+        </div>
+
+        <RadzenStack Orientation="Orientation.Horizontal" JustifyContent="JustifyContent.End" Gap="0.5rem">
+            <RadzenButton Text="Receipt" Icon="receipt" ButtonStyle="ButtonStyle.Light" Click="@(() => ReceiptDialog.OpenAsync(Dialogs, TransactionId))" class="rz-me-auto" />
+            @if (transaction.Status == TransactionStatus.Completed)
+            {
+                <RadzenButton Text="Void" Icon="block" ButtonStyle="ButtonStyle.Danger" Variant="Variant.Outlined" Click="VoidAsync" />
+            }
+            <RadzenButton Text="Close" ButtonStyle="ButtonStyle.Light" Click="@(() => Dialogs.Close())" />
+        </RadzenStack>
+    </RadzenStack>
+}
+
+@code {
+    [Parameter] public int TransactionId { get; set; }
+
+    private Transaction? transaction;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        transaction = await db.Transactions.AsNoTracking()
+            .Include(t => t.Items.OrderBy(i => i.Id))
+            .FirstOrDefaultAsync(t => t.Id == TransactionId);
+        if (transaction is null) Dialogs.Close();
+    }
+
+    private async Task VoidAsync()
+    {
+        var confirmed = await Dialogs.Confirm($"Void transaction #{TransactionId}? It will be excluded from sales totals.", "Void transaction",
+            new ConfirmOptions { OkButtonText = "Void", CancelButtonText = "Cancel" });
+        if (confirmed != true) return;
+        if (await Approvals.RequestAsync($"Void transaction #{TransactionId} ({transaction!.Total:C}).") is not { } approver) return;
+
+        try
+        {
+            await Sales.VoidAsync(TransactionId, approver.UserId);
+            Notifications.Notify(NotificationSeverity.Info, $"Transaction #{TransactionId} voided");
+            await LoadAsync();
+        }
+        catch (CheckoutException ex)
+        {
+            Notifications.Notify(NotificationSeverity.Error, "Could not void", ex.Message);
+        }
+    }
+}

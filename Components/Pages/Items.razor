@@ -1,0 +1,127 @@
+@page "/items"
+@attribute [Authorize(Policy = Policies.Manage)]
+@using Npgsql
+@inject IDbContextFactory<PosDbContext> DbFactory
+@inject NotificationService Notifications
+
+<PageTitle>Items</PageTitle>
+
+<RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" JustifyContent="JustifyContent.SpaceBetween" class="rz-mb-3">
+    <RadzenText TextStyle="TextStyle.H5" class="rz-m-0">Items</RadzenText>
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1rem">
+        <RadzenCheckBox @bind-Value="showInactive" @bind-Value:after="LoadAsync" Name="showInactive" />
+        <RadzenLabel Text="Show inactive" Component="showInactive" />
+        <RadzenButton Text="Add item" Icon="add" Click="InsertAsync" Disabled="@(editing is not null)" />
+    </RadzenStack>
+</RadzenStack>
+
+<RadzenDataGrid @ref="grid" TItem="Item" Data="@items" EditMode="DataGridEditMode.Single"
+                AllowFiltering="true" FilterMode="FilterMode.Simple" FilterCaseSensitivity="FilterCaseSensitivity.CaseInsensitive"
+                AllowSorting="true" AllowPaging="true" PageSize="20" Density="Density.Compact"
+                RowCreate="CreateAsync" RowUpdate="UpdateAsync" EmptyText="No items.">
+    <Columns>
+        <RadzenDataGridColumn Property="@nameof(Item.Name)" Title="Name">
+            <EditTemplate Context="item">
+                <RadzenTextBox @bind-Value="item.Name" Name="Name" MaxLength="200" Style="width: 100%" />
+                <RadzenRequiredValidator Component="Name" Text="Name is required" Popup="true" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(Item.Barcode)" Title="Barcode" Width="170px">
+            <EditTemplate Context="item">
+                <RadzenTextBox @bind-Value="item.Barcode" Name="Barcode" MaxLength="64" Style="width: 100%" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(Item.Category)" Title="Category" Width="160px">
+            <EditTemplate Context="item">
+                <RadzenTextBox @bind-Value="item.Category" Name="Category" MaxLength="100" Style="width: 100%" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(Item.Price)" Title="Price" FormatString="{0:C}" TextAlign="TextAlign.Right" Width="130px">
+            <EditTemplate Context="item">
+                <RadzenNumeric TValue="decimal" @bind-Value="item.Price" Name="Price" Min="0" Format="0.00" ShowUpDown="false" Style="width: 100%" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Property="@nameof(Item.IsActive)" Title="Active" Width="100px" Filterable="false" TextAlign="TextAlign.Center">
+            <Template Context="item">
+                <RadzenIcon Icon="@(item.IsActive ? "check" : "close")" />
+            </Template>
+            <EditTemplate Context="item">
+                <RadzenCheckBox @bind-Value="item.IsActive" Name="IsActive" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+        <RadzenDataGridColumn Context="item" Filterable="false" Sortable="false" TextAlign="TextAlign.Right" Width="120px">
+            <Template Context="item">
+                <RadzenButton Icon="edit" Size="ButtonSize.Small" Variant="Variant.Text" Click="@(() => EditAsync(item))"
+                              Disabled="@(editing is not null)" />
+            </Template>
+            <EditTemplate Context="item">
+                <RadzenButton Icon="check" Size="ButtonSize.Small" Variant="Variant.Text" ButtonStyle="ButtonStyle.Success" Click="@(() => grid.UpdateRow(item))" />
+                <RadzenButton Icon="close" Size="ButtonSize.Small" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Click="@(() => CancelAsync(item))" />
+            </EditTemplate>
+        </RadzenDataGridColumn>
+    </Columns>
+</RadzenDataGrid>
+
+@code {
+    private RadzenDataGrid<Item> grid = null!;
+    private List<Item> items = [];
+    private Item? editing;
+    private bool showInactive;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        items = await db.Items.AsNoTracking()
+            .Where(i => showInactive || i.IsActive)
+            .OrderBy(i => i.Name)
+            .ToListAsync();
+    }
+
+    private async Task InsertAsync()
+    {
+        editing = new Item();
+        await grid.InsertRow(editing);
+    }
+
+    private async Task EditAsync(Item item)
+    {
+        editing = item;
+        await grid.EditRow(item);
+    }
+
+    private async Task CancelAsync(Item item)
+    {
+        grid.CancelEditRow(item);
+        editing = null;
+        await LoadAsync(); // discard unsaved changes to the row
+    }
+
+    private Task CreateAsync(Item item) => SaveAsync(item, isNew: true);
+
+    private Task UpdateAsync(Item item) => SaveAsync(item, isNew: false);
+
+    private async Task SaveAsync(Item item, bool isNew)
+    {
+        item.Name = item.Name.Trim();
+        item.Barcode = string.IsNullOrWhiteSpace(item.Barcode) ? null : item.Barcode.Trim();
+        item.Category = string.IsNullOrWhiteSpace(item.Category) ? null : item.Category.Trim();
+        item.UpdatedAt = DateTime.UtcNow;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            if (isNew) db.Items.Add(item);
+            else db.Items.Update(item);
+            await db.SaveChangesAsync();
+            Notifications.Notify(NotificationSeverity.Success, isNew ? "Item added" : "Item saved", item.Name);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            Notifications.Notify(NotificationSeverity.Error, "Not saved", $"Barcode {item.Barcode} is already used by another item.", 8000);
+        }
+        editing = null;
+        await LoadAsync();
+    }
+}

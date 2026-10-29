@@ -1,0 +1,25 @@
+@* A scannable barcode, or the code in large type for produce codes (PLUs) that are typed in. *@
+@if (svg is not null)
+{
+    <span class="barcode">@((MarkupString)svg)</span>
+}
+else
+{
+    <span class="barcode barcode-typed">
+        <span class="barcode-typed-label">@(Barcodes.IsPlu(Value.Trim()) ? "PLU" : "Code")</span>
+        <span class="barcode-typed-code">@Value</span>
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+
+    /// <summary>CSS pixels per module; 2 suits most scanners reading off a screen.</summary>
+    [Parameter] public int ModuleWidth { get; set; } = 2;
+
+    [Parameter] public int BarHeight { get; set; } = 60;
+
+    private string? svg;
+
+    protected override void OnParametersSet() => svg = Barcodes.Svg(Value, ModuleWidth, BarHeight);
+}

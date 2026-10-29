@@ -1,0 +1,105 @@
+@* The customer at the till in customer mode. Nothing here can take the keyboard focus except the
+   "Next customer" button, so a scanner keeps typing into the scan box. *@
+
+<div class="game-stats">
+    <span><strong>@Game.Served</strong> served</span>
+    <span><strong>@Game.Points</strong> points</span>
+    <span><strong>@Game.Streak</strong> perfect in a row (best @Game.BestStreak)</span>
+    @if (Game.Served > 0)
+    {
+        <span>avg <strong>@Seconds(Game.TotalTime / Game.Served)</strong> per customer</span>
+    }
+</div>
+
+@if (Game.Current is { } customer)
+{
+    var expected = CustomerGenerator.Expected(customer.Basket, customer.Coupon, Game.MindChanged ? customer.ChangesMindAbout : null);
+
+    <div class="customer-header">
+        <span class="customer-avatar">@customer.Name[0]</span>
+        <div>
+            <div class="customer-name">Customer #@customer.Number: @customer.Name</div>
+            <div class="customer-says">"@customer.Greeting"</div>
+        </div>
+        <RadzenBadge BadgeStyle="@(customer.PaysWith == PaymentMethod.Cash ? BadgeStyle.Success : BadgeStyle.Info)" class="customer-pays"
+                     Text="@(customer.CashHanded is { } cash ? $"Pays cash: hands you {cash:C}" : "Pays by card")" />
+    </div>
+
+    @if (customer.Coupon is { } coupon)
+    {
+        <div class="customer-note coupon">
+            <RadzenIcon Icon="confirmation_number" />
+            <span>Coupon: <strong>@coupon.Discount.ToString("C") off @coupon.ItemName</strong>. Click its price in the sale and change it to @coupon.NewPrice.ToString("C").</span>
+        </div>
+    }
+    @if (Game.MindChanged && customer.ChangesMindAbout is { } putBack)
+    {
+        <div class="customer-note put-back">
+            <RadzenIcon Icon="undo" />
+            <span>"Oh wait, I don't want <strong>@(putBack.Quantity > 1 ? "one of the" : "the") @putBack.Name</strong> after all."</span>
+        </div>
+    }
+
+    <div class="basket">
+        @foreach (var line in customer.Basket)
+        {
+            var want = expected.TryGetValue(line.ItemId, out var e) ? e.Quantity : 0;
+            var got = CustomerGame.Scanned(Cart, line.ItemId);
+            <div class="basket-item @(got == want ? "done" : got > want ? "over" : "")">
+                <div class="basket-item-head">
+                    <span class="basket-item-name">@line.Name</span>
+                    <span class="basket-item-qty">@got / @want</span>
+                </div>
+                @if (line.Quantity > 1)
+                {
+                    <div class="basket-item-count">&times; @line.Quantity</div>
+                }
+                @if (line.Smudged)
+                {
+                    <span class="barcode barcode-typed smudged">
+                        <span class="barcode-typed-label">Smudged, won't scan: type it</span>
+                        <span class="barcode-typed-code">@line.Barcode</span>
+                    </span>
+                }
+                else
+                {
+                    <Barcode Value="@line.Barcode" />
+                }
+            </div>
+        }
+    </div>
+}
+else
+{
+    @if (Game.LastResult is { } result)
+    {
+        <div class="game-result @(result.Perfect ? "perfect" : "")">
+            <div class="game-result-points">+@result.Points</div>
+            <div>
+                <div class="game-result-title">
+                    @(result.Perfect ? "Perfect!" : $"{result.Mistakes.Count} mistake{(result.Mistakes.Count == 1 ? "" : "s")}")
+                    &middot; @Seconds(result.Time)
+                </div>
+                @foreach (var mistake in result.Mistakes)
+                {
+                    <div class="game-result-mistake">@mistake</div>
+                }
+            </div>
+        </div>
+    }
+    <RadzenStack Orientation="Orientation.Horizontal" AlignItems="AlignItems.Center" Gap="1rem" class="rz-mt-3">
+        <RadzenButton Text="Next customer" Icon="person" ButtonStyle="ButtonStyle.Primary" Click="OnNextCustomer" class="next-customer" />
+        <span class="muted">or press Enter in the scan box</span>
+    </RadzenStack>
+}
+
+@code {
+    [Parameter, EditorRequired] public CustomerGame Game { get; set; } = default!;
+    [Parameter, EditorRequired] public Cart Cart { get; set; } = default!;
+    [Parameter] public EventCallback OnNextCustomer { get; set; }
+
+    // The cart is the same object every time, so this runs on every re-render of the checkout page.
+    protected override void OnParametersSet() => Game.Observe(Cart);
+
+    private static string Seconds(TimeSpan t) => t.TotalMinutes >= 1 ? $"{(int)t.TotalMinutes}:{t.Seconds:00}" : $"{t.TotalSeconds:0}s";
+}
